@@ -1,0 +1,10 @@
+{
+  "model": "deepseek-v2",
+  "routing": {"topk": 2, "seed": 7, "zipf_s": 1.05},
+  "sequence": {"tokens": 1024, "micro_batch": 16, "steps": 8},
+  "operators": {
+    "fc": {"flop_per_token": 1.8e9},
+    "attn": {"flop_per_token": 0.8e9, "kv_bytes_per_token": 2048}
+  },
+  "tensors": {"weight_shard_mb": 48}
+}
