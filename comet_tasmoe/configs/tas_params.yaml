@@ -1,0 +1,15 @@
+{
+  "taps": {
+    "objective": {"w_peak": 1.0, "w_var": 0.2, "w_smooth": 0.1},
+    "capacity": {"core_flops_tps": 5e12, "bank_bw_gbps": 25},
+    "replicate_hot_k": 1
+  },
+  "tacs": {
+    "window_ms": 3.0,
+    "thresholds": {"Thot": 80.0, "Temg": 90.0},
+    "q_target": 0.7,
+    "cost": {"lambda_hops": 1.0, "mu_noc": 2.0, "eta_temp": 1.5},
+    "max_parallel_migrations": 4,
+    "min_residency_ms": 15
+  }
+}
