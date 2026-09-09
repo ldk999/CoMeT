@@ -164,6 +164,7 @@ def run_experiment(
                 state,
                 tas_params.get("tacs", {}),
                 pending,
+                cfg_arch,
             )
             overlays = _df_to_overlays(reroute_df, migrate_df)
 
