@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass
 from typing import Dict, Iterable, List, Tuple
 
@@ -14,6 +15,7 @@ from .overlay_types import MigrationOverlay, RerouteOverlay, WindowView
 from .replica_state import ReplicaState
 
 LOGGER = logging.getLogger(__name__)
+_BANK_RE = re.compile(r"^B\((\d+),(\d+),(\d+)\)$")
 
 
 @dataclass
@@ -65,12 +67,47 @@ def _find_cool_cores(scores: List[float], temps: Iterable[float], limit: int) ->
     return result
 
 
+def _project_coordinate(index: int, source_size: int, destination_size: int) -> int:
+    if source_size <= 1 or destination_size <= 1:
+        return 0
+    return index * (destination_size - 1) // (source_size - 1)
+
+
+def _bank_for_core(dst_core: int, src_bank: str, cfg_arch: Dict[str, object]) -> str:
+    match = _BANK_RE.fullmatch(src_bank)
+    if match is None:
+        return ""
+
+    core_dims = cfg_arch.get("mesh", {}).get("cores", [])
+    bank_dims = cfg_arch.get("dram", {}).get("banks", [])
+    if len(core_dims) != 2 or len(bank_dims) != 3:
+        return ""
+
+    core_x_size, core_y_size = (int(value) for value in core_dims)
+    bank_x_size, bank_y_size, bank_z_size = (int(value) for value in bank_dims)
+    if min(core_x_size, core_y_size, bank_x_size, bank_y_size, bank_z_size) <= 0:
+        return ""
+    if dst_core < 0 or dst_core >= core_x_size * core_y_size:
+        return ""
+
+    src_z = int(match.group(3))
+    if src_z >= bank_z_size:
+        return ""
+
+    core_x = dst_core % core_x_size
+    core_y = dst_core // core_x_size
+    bank_x = _project_coordinate(core_x, core_x_size, bank_x_size)
+    bank_y = _project_coordinate(core_y, core_y_size, bank_y_size)
+    return f"B({bank_x},{bank_y},{src_z})"
+
+
 def tacs_step(
     tele: Telemetry,
     placement: Dict[str, object],
     state: ReplicaState,
     params: Dict[str, object],
     pending_window: WindowView,
+    cfg_arch: Dict[str, object],
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     scores = _pressure_scores(tele, params)
     max_parallel = int(params.get("max_parallel_migrations", 1))
@@ -110,20 +147,21 @@ def tacs_step(
             )
         )
         tensor_id = f"W_E{mb_id % max(1, len(placement.get('experts', {})))}_0"
-        src_bank = placement.get("tensors", {}).get(tensor_id, {}).get("dram_bank", "")
-        migrations.append(
-            MigrationOverlay(
-                t_apply_ns=tele.ts_ns,
-                obj_type="weight",
-                obj_id=tensor_id,
-                src=src_bank,
-                dst=src_bank,
-                size_bytes=int(
-                    placement.get("tensors", {}).get(tensor_id, {}).get("size_bytes", 0)
-                ),
-                cost=float(cost),
+        tensor_info = placement.get("tensors", {}).get(tensor_id, {})
+        src_bank = str(tensor_info.get("dram_bank", ""))
+        dst_bank = _bank_for_core(dst_core, src_bank, cfg_arch)
+        if dst_bank and dst_bank != src_bank:
+            migrations.append(
+                MigrationOverlay(
+                    t_apply_ns=tele.ts_ns,
+                    obj_type="weight",
+                    obj_id=tensor_id,
+                    src=src_bank,
+                    dst=dst_bank,
+                    size_bytes=int(tensor_info.get("size_bytes", 0)),
+                    cost=float(cost),
+                )
             )
-        )
 
     reroute_df = pd.DataFrame(
         [
@@ -139,13 +177,8 @@ def tacs_step(
             for r in reroutes
         ],
         columns=[
-            "t_apply_ns",
-            "scope",
-            "from_core",
-            "to_core",
-            "mb_ids_json",
-            "reason",
-            "expected_gain",
+            "t_apply_ns", "scope", "from_core", "to_core", "mb_ids_json",
+            "reason", "expected_gain",
         ],
     )
 
@@ -162,15 +195,7 @@ def tacs_step(
             }
             for m in migrations
         ],
-        columns=[
-            "t_apply_ns",
-            "obj_type",
-            "obj_id",
-            "src",
-            "dst",
-            "size_bytes",
-            "cost",
-        ],
+        columns=["t_apply_ns", "obj_type", "obj_id", "src", "dst", "size_bytes", "cost"],
     )
 
     return reroute_df, migrate_df
