@@ -1,0 +1,10 @@
+{
+  "model": "mixtral-8x7b",
+  "routing": {"topk": 2, "seed": 42, "zipf_s": 1.2},
+  "sequence": {"tokens": 2048, "micro_batch": 32, "steps": 10},
+  "operators": {
+    "fc": {"flop_per_token": 2.5e9},
+    "attn": {"flop_per_token": 1.0e9, "kv_bytes_per_token": 4096}
+  },
+  "tensors": {"weight_shard_mb": 64}
+}
